@@ -7,11 +7,19 @@ use crate::get_mapping;
 
 const EMAIL_HEADER: &str = "X-Sync-User-Email";
 
-pub fn run(port: u16, upstream_base: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let addr = format!("127.0.0.1:{port}");
-    let server = Server::http(&addr).map_err(|e| format!("bind {addr}: {e}"))?;
-    eprintln!("[lzc-sync] proxy listening on {addr}");
+/// 启动代理，绑定到 127.0.0.1:0（OS 分配端口），返回实际端口
+pub fn start(_upstream_base: &str) -> Result<(Server, u16), Box<dyn std::error::Error>> {
+    let server = Server::http("127.0.0.1:0").map_err(|e| format!("bind 127.0.0.1:0: {e}"))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .ok_or("failed to get server address")?
+        .port();
+    eprintln!("[lzc-sync] proxy listening on 127.0.0.1:{port}");
+    Ok((server, port))
+}
 
+pub fn run(server: Server, upstream_base: &str) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::builder()
         .danger_accept_invalid_certs(false)
         .build()?;
@@ -26,8 +34,7 @@ pub fn run(port: u16, upstream_base: &str) -> Result<(), Box<dyn std::error::Err
             }
             Err(e) => {
                 eprintln!("[lzc-sync] request error: {e}");
-                let resp = Response::from_string(format!("proxy error: {e}"))
-                    .with_status_code(502);
+                let resp = Response::from_string(format!("proxy error: {e}")).with_status_code(502);
                 let _ = request.respond(resp);
             }
         }
@@ -55,9 +62,15 @@ fn handle_request(
         .and_then(|id| get_mapping().and_then(|m| m.lookup(id)));
 
     if let Some(email) = email {
-        eprintln!("[lzc-sync] sync request from: {email} (client_id: {})", client_id.as_deref().unwrap_or("?"));
+        eprintln!(
+            "[lzc-sync] sync request from: {email} (client_id: {})",
+            client_id.as_deref().unwrap_or("?")
+        );
     } else {
-        eprintln!("[lzc-sync] sync request, unknown user (client_id: {:?})", client_id);
+        eprintln!(
+            "[lzc-sync] sync request, unknown user (client_id: {:?})",
+            client_id
+        );
     }
 
     // 构建上游 URL: 替换 host 部分，保留 path 和 query

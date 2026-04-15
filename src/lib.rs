@@ -8,7 +8,6 @@ use std::sync::OnceLock;
 
 use mapping::AccountMapping;
 
-const PROXY_PORT: u16 = 18643;
 const UPSTREAM_URL: &str = "https://clients4.google.com/chrome-sync";
 
 static MAPPING: OnceLock<AccountMapping> = OnceLock::new();
@@ -52,10 +51,10 @@ fn is_chrome_browser_process(argc: c_int, argv: *mut *mut c_char) -> bool {
     // 排除带 --type= 的子进程
     for i in 1..argc as isize {
         let arg = unsafe { CStr::from_ptr(*argv.offset(i)) };
-        if let Ok(s) = arg.to_str() {
-            if s.starts_with("--type=") {
-                return false;
-            }
+        if let Ok(s) = arg.to_str()
+            && s.starts_with("--type=")
+        {
+            return false;
         }
     }
     true
@@ -65,10 +64,10 @@ fn get_switch_value(argc: c_int, argv: *mut *mut c_char, name: &str) -> Option<S
     let prefix = format!("--{name}=");
     for i in 0..argc as isize {
         let arg = unsafe { CStr::from_ptr(*argv.offset(i)) };
-        if let Ok(s) = arg.to_str() {
-            if let Some(value) = s.strip_prefix(&prefix) {
-                return Some(value.to_string());
-            }
+        if let Ok(s) = arg.to_str()
+            && let Some(value) = s.strip_prefix(&prefix)
+        {
+            return Some(value.to_string());
         }
     }
     None
@@ -83,6 +82,9 @@ pub fn get_mapping() -> Option<&'static AccountMapping> {
     MAPPING.get()
 }
 
+/// # Safety
+/// Called by the dynamic linker as the process entry point.
+/// `argv` must point to a valid null-terminated array of `argc` C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __libc_start_main(
     main: MainFn,
@@ -124,19 +126,28 @@ pub unsafe extern "C" fn __libc_start_main(
     eprintln!("[lzc-sync] account mapping: {account_mapping:?}");
     MAPPING.set(account_mapping).ok();
 
-    // 启动代理线程
+    // 启动代理（先绑定端口获取实际端口号，再启动服务线程）
+    let (server, port) = match proxy::start(UPSTREAM_URL) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[lzc-sync] failed to start proxy: {e}");
+            unsafe {
+                REAL_MAIN = Some(main);
+                return real_start_main(wrapped_main, argc, argv, init, fini, rtld_fini, stack_end);
+            }
+        }
+    };
+
     let upstream = UPSTREAM_URL.to_string();
     std::thread::spawn(move || {
-        if let Err(e) = proxy::run(PROXY_PORT, &upstream) {
+        if let Err(e) = proxy::run(server, &upstream) {
             eprintln!("[lzc-sync] proxy error: {e}");
         }
     });
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
     // 注入 --sync-url
     let sync_url_arg =
-        CString::new(format!("--sync-url=http://127.0.0.1:{PROXY_PORT}/chrome-sync")).unwrap();
+        CString::new(format!("--sync-url=http://127.0.0.1:{port}/chrome-sync")).unwrap();
 
     let new_argc = argc + 1;
     let mut new_argv: Vec<*mut c_char> = Vec::with_capacity(new_argc as usize + 1);

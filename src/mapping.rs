@@ -69,10 +69,7 @@ impl AccountMapping {
 
         for dir in &profile_dirs {
             if let Err(e) = mapping.load_profile(dir) {
-                eprintln!(
-                    "[lzc-sync] skipping {}: {e}",
-                    dir.display()
-                );
+                eprintln!("[lzc-sync] skipping {}: {e}", dir.display());
             }
         }
 
@@ -96,43 +93,46 @@ impl AccountMapping {
         }
 
         // 从 google.services 补充（如果 account_info 没有对应的 email）
-        if let Some(google) = &prefs.google {
-            if let Some(services) = &google.services {
-                if let Some(account_id) = &services.account_id {
-                    let email = services
-                        .last_username
-                        .as_deref()
-                        .or(services.last_signed_in_username.as_deref());
-                    if let Some(email) = email {
-                        gaia_to_email.entry(account_id.clone()).or_insert_with(|| email.to_string());
-                    }
-                }
+        if let Some(google) = &prefs.google
+            && let Some(services) = &google.services
+            && let Some(account_id) = &services.account_id
+        {
+            let email = services
+                .last_username
+                .as_deref()
+                .or(services.last_signed_in_username.as_deref());
+            if let Some(email) = email {
+                gaia_to_email
+                    .entry(account_id.clone())
+                    .or_insert_with(|| email.to_string());
             }
         }
 
         // 遍历 transport_data_per_account，通过 gaia_id_hash 关联 cache_guid 和 email
-        if let Some(sync) = &prefs.sync {
-            if let Some(transport) = &sync.transport_data_per_account {
-                for (gaia_id_hash, data) in transport {
-                    if let Some(cache_guid) = &data.cache_guid {
-                        // 找到 gaia_id_hash 对应的 email
-                        let email = gaia_to_email.iter().find_map(|(gaia_id, email)| {
-                            let hash = gaia_id_to_hash(gaia_id);
-                            if &hash == gaia_id_hash {
-                                Some(email.clone())
-                            } else {
-                                None
-                            }
-                        });
-
-                        if let Some(email) = email {
-                            eprintln!(
-                                "[lzc-sync]   {} -> cache_guid={} -> {email}",
-                                profile_dir.file_name().unwrap_or_default().to_string_lossy(),
-                                cache_guid
-                            );
-                            self.map.insert(cache_guid.clone(), email);
+        if let Some(sync) = &prefs.sync
+            && let Some(transport) = &sync.transport_data_per_account
+        {
+            for (gaia_id_hash, data) in transport {
+                if let Some(cache_guid) = &data.cache_guid {
+                    let email = gaia_to_email.iter().find_map(|(gaia_id, email)| {
+                        let hash = gaia_id_to_hash(gaia_id);
+                        if &hash == gaia_id_hash {
+                            Some(email.clone())
+                        } else {
+                            None
                         }
+                    });
+
+                    if let Some(email) = email {
+                        eprintln!(
+                            "[lzc-sync]   {} -> cache_guid={} -> {email}",
+                            profile_dir
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy(),
+                            cache_guid
+                        );
+                        self.map.insert(cache_guid.clone(), email);
                     }
                 }
             }
