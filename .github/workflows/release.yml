@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: # 新增这一行，允许手动点击运行
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
