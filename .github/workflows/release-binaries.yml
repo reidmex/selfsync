@@ -25,12 +25,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 关键修改：使用社区公认稳定的 Rust 安装 Action
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
+
+      # 关键步骤：为不同平台安装 protoc
+      - name: Install dependencies
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            brew install protobuf
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            choco install protoc
+          fi
+        shell: bash
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -39,7 +51,15 @@ jobs:
         run: |
           BINARY_NAME=selfsync-server${{ matrix.suffix || '' }}
           cp target/${{ matrix.target }}/release/$BINARY_NAME ./$BINARY_NAME
+          
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            strip ./$BINARY_NAME
+          fi
+          
           shasum -a 256 ./$BINARY_NAME > ./$BINARY_NAME.sha256
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            certutil -hashfile ./$BINARY_NAME SHA256 > ./$BINARY_NAME.sha256
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
