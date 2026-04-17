@@ -1,0 +1,114 @@
+name: Release Binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:  # 可选，允许手动触发
+
+permissions:
+  contents: write  # 必须，用于将二进制文件写入 GitHub Release
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # 定义你要构建的目标平台 (Rust target triple)
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: windows-x86_64
+            suffix: .exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust/setup-rust@v2
+        with:
+          rust-version: stable
+          target: ${{ matrix.target }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+          # 为交叉编译安装工具链 (如果需要)
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release binary
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          # 在 macOS 上可能需要设置一些环境变量
+          if [[ "${{ matrix.target }}" == *-apple-* ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=10.15
+          fi
+
+      - name: Prepare binary for upload
+        run: |
+          # 复制二进制文件到标准位置
+          BINARY_NAME=selfsync-server${{ matrix.suffix || '' }}
+          cp target/${{ matrix.target }}/release/$BINARY_NAME ./$BINARY_NAME
+          
+          # 在 Linux 上，可以 strip 以减少体积
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            strip ./$BINARY_NAME
+          fi
+          
+          # 计算 SHA256 校验和
+          shasum -a 256 ./$BINARY_NAME > ./$BINARY_NAME.sha256
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            certutil -hashfile ./$BINARY_NAME SHA256 > ./$BINARY_NAME.sha256
+          fi
+
+      - name: Upload binaries as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-binary
+          path: |
+            selfsync-server${{ matrix.suffix || '' }}
+            selfsync-server${{ matrix.suffix || '' }}.sha256
+          retention-days: 7
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          pattern: '*-binary'
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
