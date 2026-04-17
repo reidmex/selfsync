@@ -87,3 +87,5 @@ Relevant paths in `~/modous/chromium/src/`:
 - `components/sync/engine/net/http_bridge.cc` — `MakeAsynchronousPost()`, HTTP request construction
 - `components/sync/protocol/sync.proto` — `ClientToServerMessage`, `ClientToServerResponse`
 - `components/sync/engine/loopback_server/loopback_server.cc` — Reference sync server implementation
+
+Build
