@@ -85,3 +85,5 @@ cargo test                                   # Run tests
 ## License
 
 [GPL-3.0](LICENSE)
+
+Build
