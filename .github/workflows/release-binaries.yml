@@ -64,7 +64,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}-binary
+          name: ${{ matrix.name }}
           path: |
             selfsync-server
             selfsync-server.sha256
